@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+todo_data.json
+*.tmp
+.env
