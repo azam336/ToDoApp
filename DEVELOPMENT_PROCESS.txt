@@ -1,0 +1,1056 @@
+================================================================================
+      ToDo CLI Application - Complete Code & Development Process Explanation
+================================================================================
+
+Author  : azam336 (with Claude Code)
+Repo    : https://github.com/azam336/ToDoApp
+Python  : 3.11+
+Method  : Specs-Driven Development (SDD)
+Date    : 2026-02-14
+
+
+================================================================================
+  TABLE OF CONTENTS
+================================================================================
+
+  1. Development Process Overview
+  2. Phase 1 - Specification & CLI Design
+  3. Phase 2 - Test Plan (Written First)
+  4. Phase 3 - Implementation (Module by Module)
+  5. Phase 4 - Verification & Deployment
+  6. Complete Code With Line-by-Line Explanations
+  7. How to Run & Test
+
+
+================================================================================
+  1. DEVELOPMENT PROCESS OVERVIEW
+================================================================================
+
+This project was built using Specs-Driven Development (SDD), a methodology
+where you define WHAT to build before HOW to build it, and write tests BEFORE
+writing the implementation. The process followed five strict phases:
+
+    Spec  -->  CLI Design  -->  Tests First  -->  Implementation  -->  Verify
+
+Why SDD?
+  - Forces clear thinking about requirements before coding
+  - Tests act as a living contract; code is "done" when tests pass
+  - Prevents scope creep and over-engineering
+  - Produces naturally modular, testable code
+
+
+================================================================================
+  2. PHASE 1 - SPECIFICATION & CLI DESIGN
+================================================================================
+
+2.1  FUNCTIONAL SPEC (Bulleted)
+---------------------------------
+
+  * Data Model - TodoItem:
+      - id           : UUID4 string, auto-generated
+      - title        : string, required
+      - category     : string, optional, defaults to "General"
+      - done         : boolean, defaults to false
+      - created_at   : ISO8601 timestamp, set on creation
+      - updated_at   : ISO8601 timestamp, refreshed on every mutation
+
+  * CRUD Operations:
+      - ADD      : Create a new item with title + optional category
+      - UPDATE   : Modify title, category, and/or done status by ID
+      - DELETE   : Remove an item by ID
+      - LIST     : Display all items with optional filters:
+                     --category <name>     (exact match, case-insensitive)
+                     --done true|false     (filter by completion)
+                     --search <substring>  (case-insensitive title search)
+
+  * Categories:
+      - Implicit (derived from items, not stored separately)
+      - A dedicated command lists unique categories with item counts
+
+  * Non-Functional:
+      - Console-only (no GUI, no web)
+      - JSON file persistence (default: todo_data.json, override: TODO_DB env)
+      - Atomic file writes (temp file + rename to prevent corruption)
+      - Zero external dependencies (Python standard library only)
+      - Exit code 0 on success, 1 on errors
+
+2.2  CLI COMMAND DESIGN
+-------------------------
+
+  The CLI uses Python's argparse with subcommands. Each command maps directly
+  to one CRUD operation or query:
+
+  COMMAND                                              ACTION
+  ---------------------------------------------------  -------------------------
+  python -m src.todo add "Title" [--category Cat]      Create new item
+  python -m src.todo update <id> [--title T]           Update existing item
+                                 [--category C]
+                                 [--done true|false]
+  python -m src.todo delete <id>                       Delete item by UUID
+  python -m src.todo list [--category C]               List/filter items
+                          [--done true|false]
+                          [--search "text"]
+  python -m src.todo categories                        Show categories + counts
+
+  Design decisions:
+    - "title" is a positional argument in ADD (most natural: todo add "Buy milk")
+    - "id" is positional in UPDATE and DELETE (most common pattern)
+    - All filters in LIST are optional flags (composable)
+    - The main() function accepts a db path parameter for testability
+
+
+================================================================================
+  3. PHASE 2 - TEST PLAN (WRITTEN FIRST)
+================================================================================
+
+Tests were written BEFORE the implementation code. This is the core of SDD.
+The test file (tests/test_todo.py) contains 18 test cases across 7 test classes:
+
+  CLASS                    TESTS  WHAT IS VERIFIED
+  -----------------------  -----  -----------------------------------------------
+  TestTodoItem               3    Model defaults, dict round-trip, touch() method
+  TestStorage                3    Load empty path, save+load, atomic write validity
+  TestCLIAdd                 2    Add with default category, add with custom cat
+  TestCLIUpdate              3    Update title, update done, missing ID returns 1
+  TestCLIDelete              2    Delete existing item, missing ID returns 1
+  TestCLIList                4    List all, filter by category/done/search
+  TestCLICategories          1    Categories command runs and returns 0
+                            --
+  Total                     18
+
+  Key testing strategies:
+    - Each test class uses setUp/tearDown to create and clean up temp JSON files
+    - Tests call main() with a db= parameter, avoiding any global state
+    - Error paths are tested (missing IDs must return exit code 1)
+    - No mocking needed; real file I/O on temp files keeps tests honest
+
+
+================================================================================
+  4. PHASE 3 - IMPLEMENTATION (MODULE BY MODULE)
+================================================================================
+
+Modules were built in dependency order: models -> storage -> cli -> todo.
+Each module was written to satisfy the tests from Phase 2.
+
+4.1  PROJECT STRUCTURE
+------------------------
+
+  ToDoApp/
+  +-- src/
+  |   +-- __init__.py      (empty, makes src a package)
+  |   +-- models.py        (TodoItem dataclass)
+  |   +-- storage.py       (JSON load/save with atomic writes)
+  |   +-- cli.py           (argparse parser + command handlers)
+  |   +-- todo.py          (main entry-point)
+  +-- tests/
+  |   +-- __init__.py      (empty, makes tests a package)
+  |   +-- test_todo.py     (18 unittest test cases)
+  +-- .gitignore
+  +-- README.md
+
+  Why this structure?
+    - Separation of concerns: data, persistence, and UI are independent
+    - Each module can be tested in isolation
+    - The cli module depends on models and storage, but not vice versa
+    - todo.py is a thin entry-point (2 functional lines)
+
+
+================================================================================
+  5. PHASE 4 - VERIFICATION & DEPLOYMENT
+================================================================================
+
+  Step 1: Ran all 18 tests
+            Command:  python -m unittest discover -s tests -v
+            Result :  18/18 passed
+
+  Step 2: End-to-end smoke test
+            Created items, listed, filtered, viewed categories
+            All output correct and formatted
+
+  Step 3: Deployed to GitHub
+            Initialized git repo, committed all files, pushed to
+            https://github.com/azam336/ToDoApp
+
+
+================================================================================
+  6. COMPLETE CODE WITH LINE-BY-LINE EXPLANATIONS
+================================================================================
+
+
+--------------------------------------------------------------------------------
+  FILE: src/models.py  -  Data model for a to-do item
+--------------------------------------------------------------------------------
+
+"""Data model for a to-do item."""
+
+from __future__ import annotations           # Enables modern type hints (X | Y)
+
+import uuid                                  # For generating unique IDs
+from dataclasses import dataclass, field, asdict   # Structured data without boilerplate
+from datetime import datetime, timezone      # UTC timestamps
+
+
+def _now_iso() -> str:
+    """Return current UTC time as ISO8601 string.
+    Example output: '2026-02-14T11:16:18.123456+00:00'
+    Used as a factory function for dataclass default values."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _new_id() -> str:
+    """Generate a random UUID4 string.
+    Example output: '4a452566-380f-48e0-b2c2-d058a7a4e68a'
+    UUID4 is random-based, so collisions are astronomically unlikely."""
+    return str(uuid.uuid4())
+
+
+@dataclass
+class TodoItem:
+    """Represents a single to-do item.
+
+    Fields:
+      title      - The task description (required, no default)
+      category   - Grouping label (defaults to "General")
+      done       - Completion status (defaults to False)
+      id         - Unique identifier (auto-generated UUID4)
+      created_at - When the item was created (auto-set to current UTC time)
+      updated_at - When the item was last modified (auto-set, refreshable)
+
+    Design note: 'title' is listed first so it can be passed positionally:
+        TodoItem("Buy milk")
+    Fields with defaults must come after fields without defaults in a
+    dataclass, which is why 'title' (no default) is first.
+    """
+    title: str
+    category: str = "General"
+    done: bool = False
+    id: str = field(default_factory=_new_id)
+    created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
+
+    def touch(self) -> None:
+        """Refresh updated_at to current time.
+        Called whenever the item is modified (title, category, or done change).
+        This lets users see when an item was last edited."""
+        self.updated_at = _now_iso()
+
+    def to_dict(self) -> dict:
+        """Convert to a plain dictionary for JSON serialization.
+        Uses dataclasses.asdict() which recursively converts all fields."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> TodoItem:
+        """Reconstruct a TodoItem from a dictionary (deserialization).
+        The ** operator unpacks the dictionary as keyword arguments.
+        This is the inverse of to_dict()."""
+        return cls(**data)
+
+
+EXPLANATION OF KEY DESIGN CHOICES:
+
+  1. Why dataclass?
+     - Automatically generates __init__, __repr__, __eq__
+     - Less boilerplate than a regular class
+     - asdict() gives free serialization
+     - Type annotations serve as documentation
+
+  2. Why default_factory instead of default?
+     - _new_id() and _now_iso() must be called at instance creation time
+     - A plain default= would be evaluated once at class definition,
+       giving every item the same ID and timestamp
+
+  3. Why store timestamps as strings, not datetime objects?
+     - JSON doesn't have a datetime type; strings serialize cleanly
+     - ISO8601 strings sort correctly as plain text
+     - No need for custom JSON encoders/decoders
+
+
+--------------------------------------------------------------------------------
+  FILE: src/storage.py  -  JSON file persistence with atomic writes
+--------------------------------------------------------------------------------
+
+"""JSON-file persistence with atomic writes."""
+
+from __future__ import annotations
+
+import json                     # Read/write JSON format
+import os                       # File operations, environment variables
+import tempfile                 # Create temporary files for atomic writes
+from pathlib import Path        # Cross-platform file paths
+
+from src.models import TodoItem
+
+DEFAULT_DB = "todo_data.json"   # Default filename if TODO_DB env var is not set
+
+
+def _db_path() -> Path:
+    """Determine which JSON file to use.
+    Checks the TODO_DB environment variable first; falls back to DEFAULT_DB.
+    This allows users to store their data anywhere:
+        export TODO_DB=/home/user/my_todos.json
+    """
+    return Path(os.environ.get("TODO_DB", DEFAULT_DB))
+
+
+def load_items(path: Path | None = None) -> list[TodoItem]:
+    """Load all to-do items from the JSON file.
+
+    Args:
+        path: Optional explicit file path (used in tests).
+              If None, uses the TODO_DB env var or default.
+
+    Returns:
+        A list of TodoItem objects. Returns empty list if file doesn't exist.
+
+    How it works:
+        1. Resolve the file path
+        2. If the file doesn't exist, return [] (first run scenario)
+        3. Read the JSON file into a Python list of dicts
+        4. Convert each dict back into a TodoItem via from_dict()
+    """
+    p = path or _db_path()
+    if not p.exists():
+        return []
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return [TodoItem.from_dict(d) for d in data]
+
+
+def save_items(items: list[TodoItem], path: Path | None = None) -> None:
+    """Atomically save all to-do items to the JSON file.
+
+    Args:
+        items: The complete list of TodoItem objects to persist.
+        path : Optional explicit file path (used in tests).
+
+    Atomic write strategy:
+        1. Convert all items to dicts
+        2. Write JSON to a TEMPORARY file in the same directory
+        3. Use os.replace() to atomically rename temp -> target
+        4. If anything fails, clean up the temp file
+
+    Why atomic writes?
+        - If the program crashes mid-write, the original file is untouched
+        - os.replace() is an atomic operation on most filesystems
+        - The temp file is in the same directory to ensure same-filesystem rename
+        - On Windows, os.replace() handles overwriting (unlike os.rename())
+    """
+    p = path or _db_path()
+    data = [item.to_dict() for item in items]
+
+    # Ensure the parent directory exists
+    dir_ = p.parent or Path(".")
+    dir_.mkdir(parents=True, exist_ok=True)
+
+    # Create a temp file in the same directory (required for atomic rename)
+    fd, tmp = tempfile.mkstemp(dir=str(dir_), suffix=".tmp")
+    try:
+        # Write JSON to the temp file
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        # Atomically replace the target file
+        os.replace(tmp, str(p))
+    except BaseException:
+        # Clean up temp file on ANY failure (including KeyboardInterrupt)
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+EXPLANATION OF KEY DESIGN CHOICES:
+
+  1. Why atomic writes?
+     - A direct write to the target file risks data loss if the process
+       is killed mid-write (partial JSON = corrupted file)
+     - Write-to-temp + rename is the standard safe pattern
+
+  2. Why os.replace() instead of os.rename()?
+     - On Windows, os.rename() fails if the target exists
+     - os.replace() works on both Windows and Unix
+
+  3. Why catch BaseException instead of Exception?
+     - BaseException includes KeyboardInterrupt and SystemExit
+     - We want to clean up the temp file even if the user presses Ctrl+C
+
+  4. Why accept an optional path parameter?
+     - Testability: tests pass temp file paths so they don't touch real data
+     - Flexibility: production code uses the env var / default
+
+
+--------------------------------------------------------------------------------
+  FILE: src/cli.py  -  Argparse CLI definition and command handlers
+--------------------------------------------------------------------------------
+
+"""Argparse CLI definition and command handlers."""
+
+from __future__ import annotations
+
+import argparse                 # Python's built-in CLI argument parser
+import sys                      # For sys.stderr (error messages)
+from pathlib import Path
+
+from src.models import TodoItem
+from src.storage import load_items, save_items
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _find_item(items: list[TodoItem], item_id: str) -> TodoItem | None:
+    """Search for an item by its UUID.
+    Returns the item if found, None otherwise.
+    Uses a simple linear scan since the data set is small (single user)."""
+    for item in items:
+        if item.id == item_id:
+            return item
+    return None
+
+
+def _print_table(items: list[TodoItem]) -> None:
+    """Print items as an aligned plain-text table.
+
+    Algorithm:
+        1. Define column headers
+        2. Convert each item to a row of strings
+        3. Calculate the maximum width of each column
+        4. Build a format string with left-aligned columns
+        5. Print header, separator line, and data rows
+
+    Example output:
+        ID        Title          Category  Done  Created              Updated
+        --------  -------------  --------  ----  -------------------  -------------------
+        4a452566  Buy groceries  Shopping  No    2026-02-14T11:16:31  2026-02-14T11:16:31
+
+    Note: ID is truncated to 8 characters for readability (still unique enough).
+    Timestamps are truncated to 19 chars (drops timezone info for display).
+    """
+    if not items:
+        print("No items found.")
+        return
+
+    headers = ["ID", "Title", "Category", "Done", "Created", "Updated"]
+    rows: list[list[str]] = []
+    for it in items:
+        rows.append([
+            it.id[:8],                          # First 8 chars of UUID
+            it.title,
+            it.category,
+            "Yes" if it.done else "No",         # Human-readable boolean
+            it.created_at[:19],                 # Trim timezone for display
+            it.updated_at[:19],
+        ])
+
+    # Calculate column widths (max of header width and data width)
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    # Build format string: each column left-aligned to its width
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    print(fmt.format(*["-" * w for w in widths]))   # Separator line
+    for row in rows:
+        print(fmt.format(*row))
+
+
+def _parse_bool(value: str) -> bool:
+    """Convert a string to boolean for argparse --done flag.
+    Accepts: true/false, yes/no, 1/0 (case-insensitive).
+    Raises ArgumentTypeError for invalid values (argparse shows a nice error)."""
+    if value.lower() in ("true", "1", "yes"):
+        return True
+    if value.lower() in ("false", "0", "no"):
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value!r}")
+
+
+# ---------------------------------------------------------------------------
+# Command handlers - each returns an exit code (0 = success, 1 = error).
+# ---------------------------------------------------------------------------
+
+def cmd_add(args: argparse.Namespace, db: Path | None = None) -> int:
+    """Handle the 'add' command.
+
+    Workflow:
+        1. Load existing items from disk
+        2. Create a new TodoItem with the given title and category
+        3. Append it to the list
+        4. Save the updated list back to disk
+        5. Print the new item's UUID so the user can reference it later
+    """
+    items = load_items(db)
+    item = TodoItem(title=args.title, category=args.category)
+    items.append(item)
+    save_items(items, db)
+    print(f"Added: {item.id}")
+    return 0
+
+
+def cmd_update(args: argparse.Namespace, db: Path | None = None) -> int:
+    """Handle the 'update' command.
+
+    Workflow:
+        1. Load all items
+        2. Find the item by UUID (return error code 1 if not found)
+        3. Apply any provided changes (title, category, done)
+        4. If anything changed, call touch() to update the timestamp
+        5. Save and confirm
+    """
+    items = load_items(db)
+    item = _find_item(items, args.id)
+    if item is None:
+        print(f"Error: item {args.id!r} not found.", file=sys.stderr)
+        return 1
+
+    changed = False
+    if args.title is not None:
+        item.title = args.title
+        changed = True
+    if args.category is not None:
+        item.category = args.category
+        changed = True
+    if args.done is not None:
+        item.done = args.done
+        changed = True
+
+    if changed:
+        item.touch()                # Refresh updated_at timestamp
+        save_items(items, db)
+        print(f"Updated: {item.id}")
+    else:
+        print("Nothing to update.")
+    return 0
+
+
+def cmd_delete(args: argparse.Namespace, db: Path | None = None) -> int:
+    """Handle the 'delete' command.
+
+    Workflow:
+        1. Load all items
+        2. Filter out the item with the given UUID
+        3. If the list length didn't change, the ID wasn't found (error)
+        4. Save the filtered list and confirm
+    """
+    items = load_items(db)
+    original_len = len(items)
+    items = [it for it in items if it.id != args.id]
+    if len(items) == original_len:
+        print(f"Error: item {args.id!r} not found.", file=sys.stderr)
+        return 1
+    save_items(items, db)
+    print(f"Deleted: {args.id}")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace, db: Path | None = None) -> int:
+    """Handle the 'list' command with optional filters.
+
+    Filters are composable - you can combine them:
+        todo list --category Work --done false --search "report"
+
+    Workflow:
+        1. Load all items
+        2. Apply each filter in sequence (category, done, search)
+        3. Print the resulting table
+
+    Filter details:
+        --category : Case-insensitive exact match on category name
+        --done     : Match on completion status (true/false)
+        --search   : Case-insensitive substring match in title
+    """
+    items = load_items(db)
+
+    if args.category:
+        items = [it for it in items if it.category.lower() == args.category.lower()]
+    if args.done is not None:
+        items = [it for it in items if it.done == args.done]
+    if args.search:
+        term = args.search.lower()
+        items = [it for it in items if term in it.title.lower()]
+
+    _print_table(items)
+    return 0
+
+
+def cmd_categories(args: argparse.Namespace, db: Path | None = None) -> int:
+    """Handle the 'categories' command.
+
+    Workflow:
+        1. Load all items
+        2. Count occurrences of each category using a dictionary
+        3. Print categories sorted alphabetically with their counts
+    """
+    items = load_items(db)
+    counts: dict[str, int] = {}
+    for it in items:
+        counts[it.category] = counts.get(it.category, 0) + 1
+
+    if not counts:
+        print("No categories (no items).")
+        return 0
+
+    max_name = max(len(c) for c in counts)
+    for cat in sorted(counts):
+        print(f"  {cat:<{max_name}}  {counts[cat]}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Parser - defines the CLI interface using argparse
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser with all subcommands.
+
+    Structure:
+        todo <command> [arguments]
+
+    Subcommands:
+        add        - positional: title, optional: --category
+        update     - positional: id, optional: --title, --category, --done
+        delete     - positional: id
+        list       - optional: --category, --done, --search
+        categories - no arguments
+    """
+    parser = argparse.ArgumentParser(
+        prog="todo",
+        description="A simple console-based to-do manager.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # --- add ---
+    p_add = sub.add_parser("add", help="Add a new to-do item")
+    p_add.add_argument("title", help="Title of the item")
+    p_add.add_argument("--category", default="General",
+                       help="Category (default: General)")
+
+    # --- update ---
+    p_upd = sub.add_parser("update", help="Update an existing item")
+    p_upd.add_argument("id", help="Item UUID")
+    p_upd.add_argument("--title", default=None, help="New title")
+    p_upd.add_argument("--category", default=None, help="New category")
+    p_upd.add_argument("--done", type=_parse_bool, default=None,
+                       help="Mark done (true/false)")
+
+    # --- delete ---
+    p_del = sub.add_parser("delete", help="Delete an item by id")
+    p_del.add_argument("id", help="Item UUID")
+
+    # --- list ---
+    p_ls = sub.add_parser("list", help="List items with optional filters")
+    p_ls.add_argument("--category", default=None, help="Filter by category")
+    p_ls.add_argument("--done", type=_parse_bool, default=None,
+                       help="Filter by done status")
+    p_ls.add_argument("--search", default=None,
+                       help="Case-insensitive substring search in title")
+
+    # --- categories ---
+    sub.add_parser("categories", help="List all categories with item counts")
+
+    return parser
+
+
+def main(argv: list[str] | None = None, db: Path | None = None) -> int:
+    """Main entry point for the CLI.
+
+    Args:
+        argv: Command-line arguments (None = use sys.argv)
+        db  : Optional database path override (for testing)
+
+    Returns:
+        Exit code: 0 on success, 1 on error
+
+    The dispatch dictionary maps command names to handler functions,
+    avoiding a long if/elif chain.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    dispatch = {
+        "add": cmd_add,
+        "update": cmd_update,
+        "delete": cmd_delete,
+        "list": cmd_list,
+        "categories": cmd_categories,
+    }
+    return dispatch[args.command](args, db)
+
+
+EXPLANATION OF KEY DESIGN CHOICES:
+
+  1. Why pass db= through every handler?
+     - Makes every command testable without touching real files
+     - Tests create temp files and pass them directly
+     - Production code passes None, which falls through to the env var/default
+
+  2. Why a dispatch dictionary instead of if/elif?
+     - Cleaner, more extensible (add a command = add one dict entry)
+     - Each handler is a standalone function, easy to test individually
+
+  3. Why truncate UUIDs to 8 characters in display?
+     - Full UUIDs (36 chars) clutter the table
+     - 8 hex chars = ~4 billion combinations, unique enough for a single user
+     - The full UUID is printed on add and is stored in the JSON file
+
+  4. Why case-insensitive category filtering?
+     - Users shouldn't have to remember exact capitalization
+     - "work", "Work", and "WORK" should all match
+
+
+--------------------------------------------------------------------------------
+  FILE: src/todo.py  -  Main entry-point
+--------------------------------------------------------------------------------
+
+"""Main entry-point: python -m src.todo <command> [args]."""
+
+import sys
+
+from src.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+    # raise SystemExit(main()) does two things:
+    #   1. Calls main(), which returns 0 or 1
+    #   2. Passes the return value to SystemExit, setting the process exit code
+    # This ensures the shell receives the correct exit code for scripting.
+
+
+--------------------------------------------------------------------------------
+  FILE: tests/test_todo.py  -  Unit test suite (18 tests)
+--------------------------------------------------------------------------------
+
+"""Unit tests for the to-do app (models, storage, cli)."""
+
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from src.models import TodoItem
+from src.storage import load_items, save_items
+from src.cli import main
+
+
+# ---- TEST CLASS 1: TodoItem model ----
+
+class TestTodoItem(unittest.TestCase):
+    """Tests for the TodoItem dataclass."""
+
+    def test_defaults(self):
+        """Verify that creating a TodoItem with just a title sets all defaults.
+        - category should be "General"
+        - done should be False
+        - id should be a 36-character UUID string
+        - created_at should contain 'T' (ISO8601 format marker)"""
+        item = TodoItem(title="Test")
+        self.assertEqual(item.title, "Test")
+        self.assertEqual(item.category, "General")
+        self.assertFalse(item.done)
+        self.assertTrue(len(item.id) == 36)
+        self.assertIn("T", item.created_at)
+
+    def test_roundtrip_dict(self):
+        """Verify that to_dict() -> from_dict() preserves all fields.
+        This is critical for JSON persistence: data must survive
+        serialization and deserialization without loss."""
+        item = TodoItem(title="RT", category="Work")
+        d = item.to_dict()
+        restored = TodoItem.from_dict(d)
+        self.assertEqual(item.id, restored.id)
+        self.assertEqual(item.title, restored.title)
+        self.assertEqual(item.category, restored.category)
+
+    def test_touch_updates_timestamp(self):
+        """Verify that touch() changes the updated_at timestamp.
+        A small sleep ensures the clock has advanced."""
+        item = TodoItem(title="T")
+        old = item.updated_at
+        import time
+        time.sleep(0.01)
+        item.touch()
+        self.assertNotEqual(old, item.updated_at)
+
+
+# ---- TEST CLASS 2: Storage layer ----
+
+class TestStorage(unittest.TestCase):
+    """Tests for JSON load/save."""
+
+    def setUp(self):
+        """Create a temporary JSON file for each test."""
+        self.tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".json", mode="w", encoding="utf-8"
+        )
+        self.tmp.close()
+        self.path = Path(self.tmp.name)
+
+    def tearDown(self):
+        """Clean up the temporary file after each test."""
+        if self.path.exists():
+            self.path.unlink()
+
+    def test_load_empty_file_path(self):
+        """Loading from a non-existent file should return an empty list,
+        not raise an error. This handles the first-run scenario."""
+        self.path.unlink()
+        items = load_items(self.path)
+        self.assertEqual(items, [])
+
+    def test_save_and_load(self):
+        """Save two items, load them back, verify count and content.
+        This is the fundamental persistence test."""
+        items = [TodoItem(title="A"), TodoItem(title="B", category="Work")]
+        save_items(items, self.path)
+        loaded = load_items(self.path)
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded[0].title, "A")
+        self.assertEqual(loaded[1].category, "Work")
+
+    def test_atomic_write_valid_json(self):
+        """After saving, the file on disk must contain valid JSON.
+        This verifies the atomic write didn't produce a corrupt file."""
+        save_items([TodoItem(title="X")], self.path)
+        with open(self.path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+
+
+# ---- TEST CLASS 3: CLI add command ----
+
+class TestCLIAdd(unittest.TestCase):
+    """Tests for the 'add' command."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".json", mode="w", encoding="utf-8"
+        )
+        self.tmp.close()
+        self.db = Path(self.tmp.name)
+        with open(self.db, "w", encoding="utf-8") as f:
+            json.dump([], f)
+
+    def tearDown(self):
+        if self.db.exists():
+            self.db.unlink()
+
+    def test_add_default_category(self):
+        """Adding an item without --category should default to 'General'.
+        Return code must be 0 (success)."""
+        rc = main(["add", "Buy milk"], db=self.db)
+        self.assertEqual(rc, 0)
+        items = load_items(self.db)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].title, "Buy milk")
+        self.assertEqual(items[0].category, "General")
+
+    def test_add_with_category(self):
+        """Adding an item with --category should store that category."""
+        main(["add", "Sprint review", "--category", "Work"], db=self.db)
+        items = load_items(self.db)
+        self.assertEqual(items[0].category, "Work")
+
+
+# ---- TEST CLASS 4: CLI update command ----
+
+class TestCLIUpdate(unittest.TestCase):
+    """Tests for the 'update' command."""
+
+    def setUp(self):
+        self.db = Path(tempfile.mktemp(suffix=".json"))
+        self.item = TodoItem(title="Old title", category="General")
+        save_items([self.item], self.db)
+
+    def tearDown(self):
+        if self.db.exists():
+            self.db.unlink()
+
+    def test_update_title(self):
+        """Updating the title should change it and return exit code 0."""
+        rc = main(["update", self.item.id, "--title", "New title"], db=self.db)
+        self.assertEqual(rc, 0)
+        items = load_items(self.db)
+        self.assertEqual(items[0].title, "New title")
+
+    def test_update_done(self):
+        """Marking an item as done should set done=True."""
+        main(["update", self.item.id, "--done", "true"], db=self.db)
+        items = load_items(self.db)
+        self.assertTrue(items[0].done)
+
+    def test_update_missing_id(self):
+        """Updating a non-existent ID should return exit code 1."""
+        rc = main(["update", "nonexistent-id", "--title", "X"], db=self.db)
+        self.assertEqual(rc, 1)
+
+
+# ---- TEST CLASS 5: CLI delete command ----
+
+class TestCLIDelete(unittest.TestCase):
+    """Tests for the 'delete' command."""
+
+    def setUp(self):
+        self.db = Path(tempfile.mktemp(suffix=".json"))
+        self.item = TodoItem(title="Delete me")
+        save_items([self.item], self.db)
+
+    def tearDown(self):
+        if self.db.exists():
+            self.db.unlink()
+
+    def test_delete_existing(self):
+        """Deleting an existing item should remove it and return 0."""
+        rc = main(["delete", self.item.id], db=self.db)
+        self.assertEqual(rc, 0)
+        self.assertEqual(load_items(self.db), [])
+
+    def test_delete_missing(self):
+        """Deleting a non-existent ID should return exit code 1."""
+        rc = main(["delete", "bad-id"], db=self.db)
+        self.assertEqual(rc, 1)
+
+
+# ---- TEST CLASS 6: CLI list command with filters ----
+
+class TestCLIList(unittest.TestCase):
+    """Tests for the 'list' command with filters."""
+
+    def setUp(self):
+        self.db = Path(tempfile.mktemp(suffix=".json"))
+        items = [
+            TodoItem(title="Buy milk", category="Shopping", done=False),
+            TodoItem(title="Write report", category="Work", done=True),
+            TodoItem(title="Buy eggs", category="Shopping", done=False),
+        ]
+        save_items(items, self.db)
+
+    def tearDown(self):
+        if self.db.exists():
+            self.db.unlink()
+
+    def test_list_all(self):
+        """Listing all items should succeed (exit code 0)."""
+        rc = main(["list"], db=self.db)
+        self.assertEqual(rc, 0)
+
+    def test_list_filter_category(self):
+        """Filtering by category should succeed."""
+        rc = main(["list", "--category", "Shopping"], db=self.db)
+        self.assertEqual(rc, 0)
+
+    def test_list_filter_done(self):
+        """Filtering by done status should succeed."""
+        rc = main(["list", "--done", "true"], db=self.db)
+        self.assertEqual(rc, 0)
+
+    def test_list_search(self):
+        """Searching by substring should succeed."""
+        rc = main(["list", "--search", "buy"], db=self.db)
+        self.assertEqual(rc, 0)
+
+
+# ---- TEST CLASS 7: CLI categories command ----
+
+class TestCLICategories(unittest.TestCase):
+    """Tests for the 'categories' command."""
+
+    def setUp(self):
+        self.db = Path(tempfile.mktemp(suffix=".json"))
+        items = [
+            TodoItem(title="A", category="Work"),
+            TodoItem(title="B", category="Work"),
+            TodoItem(title="C", category="Home"),
+        ]
+        save_items(items, self.db)
+
+    def tearDown(self):
+        if self.db.exists():
+            self.db.unlink()
+
+    def test_categories(self):
+        """Categories command should list categories and return 0."""
+        rc = main(["categories"], db=self.db)
+        self.assertEqual(rc, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+================================================================================
+  7. HOW TO RUN & TEST
+================================================================================
+
+CLONE THE REPOSITORY:
+    git clone https://github.com/azam336/ToDoApp.git
+    cd ToDoApp
+
+ADD AN ITEM:
+    python -m src.todo add "Buy groceries" --category Shopping
+    # Output: Added: 4a452566-380f-48e0-b2c2-d058a7a4e68a
+
+ADD MORE ITEMS:
+    python -m src.todo add "Finish report" --category Work
+    python -m src.todo add "Call dentist"
+
+LIST ALL ITEMS:
+    python -m src.todo list
+    # Output:
+    # ID        Title          Category  Done  Created              Updated
+    # --------  -------------  --------  ----  -------------------  -------------------
+    # 4a452566  Buy groceries  Shopping  No    2026-02-14T11:16:31  2026-02-14T11:16:31
+    # 05a1ddd5  Finish report  Work      No    2026-02-14T11:16:31  2026-02-14T11:16:31
+    # 2fc16f6a  Call dentist   General   No    2026-02-14T11:16:31  2026-02-14T11:16:31
+
+FILTER BY CATEGORY:
+    python -m src.todo list --category Shopping
+
+FILTER BY STATUS:
+    python -m src.todo list --done false
+
+SEARCH IN TITLES:
+    python -m src.todo list --search "buy"
+
+COMBINE FILTERS:
+    python -m src.todo list --category Work --done false --search "report"
+
+MARK AN ITEM AS DONE:
+    python -m src.todo update 4a452566-380f-48e0-b2c2-d058a7a4e68a --done true
+
+UPDATE TITLE AND CATEGORY:
+    python -m src.todo update <id> --title "Buy oat milk" --category Groceries
+
+DELETE AN ITEM:
+    python -m src.todo delete <id>
+
+VIEW CATEGORIES WITH COUNTS:
+    python -m src.todo categories
+    # Output:
+    #   General   1
+    #   Shopping  1
+    #   Work      1
+
+SHOW HELP:
+    python -m src.todo --help
+    python -m src.todo add --help
+
+RUN ALL 18 TESTS:
+    python -m unittest discover -s tests -v
+
+CUSTOM DATA FILE LOCATION:
+    export TODO_DB=/path/to/my_todos.json
+    python -m src.todo add "Task in custom location"
+
+
+================================================================================
+  END OF DOCUMENT
+================================================================================
